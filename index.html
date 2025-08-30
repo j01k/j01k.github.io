@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ASCII Aim Trainer — Nuclear (Hitscan)</title>
+<style>
+  :root { color-scheme: dark; --bg:#0c0b0c; --red:#d83131; --gold:#ffcf48; --ink:#f6f3f0; --mut:#b89f9f; --panel:rgba(20,12,12,.82); --border:rgba(255,255,255,.08); }
+  html,body { margin:0; height:100%; background:var(--bg); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; overflow:hidden; }
+
+  /* Nuclear styling: vignette + scanlines */
+  .fx-vignette::before {
+    content:""; position:fixed; inset:0;
+    background: radial-gradient(1200px 700px at 50% 35%, rgba(216,49,49,.18), transparent 60%),
+                radial-gradient(1200px 700px at 50% 120%, rgba(216,49,49,.20), transparent 65%);
+    pointer-events:none; mix-blend-mode: screen;
+  }
+  .fx-scan::after{
+    content:""; position:fixed; inset:0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.0) 0, rgba(0,0,0,.0) 1px, rgba(0,0,0,.14) 2px);
+    opacity:.25; pointer-events:none;
+  }
+
+  #wrap { position:fixed; inset:0; }
+  canvas { width:100vw; height:100vh; display:block; image-rendering: pixelated; }
+
+  .hud {
+    position: fixed; left: 14px; top: 12px; color: var(--ink); font-size:14px; line-height:1.2;
+    background: var(--panel); padding:10px 12px; border-radius:12px; border:1px solid var(--border); backdrop-filter: blur(4px);
+  }
+  .hud .row{ display:flex; gap:10px; align-items:center; margin:2px 0; }
+  .badge{ display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.06); }
+  .badge .dot{ width:8px; height:8px; border-radius:999px; background:var(--red); box-shadow:0 0 12px rgba(216,49,49,.6); }
+  .big { font-size:16px; }
+  .mut { color: var(--mut); }
+
+  .overlay {
+    position: fixed; inset:0; display:grid; place-items:center; color:var(--ink);
+  }
+  .panel {
+    text-align:center; background:var(--panel); border:1px solid var(--border);
+    padding:18px 22px; border-radius:14px; max-width:560px; box-shadow:0 20px 60px rgba(0,0,0,.35);
+  }
+  .title { margin:0 0 6px; font-size:22px; letter-spacing:.04em; }
+  .slogan { margin:2px 0 10px; color:var(--mut); }
+  .btn {
+    display:inline-block; margin-top:12px; padding:10px 16px; border-radius:999px; cursor:pointer;
+    border:1px solid #a54444; color:#ffeceb; background:linear-gradient(180deg,#591919,#3b1010);
+    user-select:none; font-weight:600;
+  }
+  .btn:active { transform: translateY(1px); }
+  .row.gap { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+
+  .footer-note { margin-top:10px; font-size:12px; color:var(--mut); }
+  .hotkey { padding:2px 6px; border:1px solid var(--border); border-radius:6px; background:rgba(255,255,255,.04); }
+
+  .topright {
+    position: fixed; right: 12px; top: 12px; color: var(--mut); font-size:12px;
+    background:var(--panel); padding:8px 10px; border-radius:10px; border:1px solid var(--border);
+  }
+</style>
+</head>
+<body class="fx-vignette fx-scan">
+  <div id="wrap"><canvas id="cv"></canvas></div>
+
+  <div class="hud">
+    <div class="row big"><span class="badge"><span class="dot"></span> ☢ ASCII Aim Trainer</span></div>
+    <div class="row"><span class="mut">Time:</span> <b id="time">60.0</b>s</div>
+    <div class="row"><span class="mut">Score:</span> <b id="score">0</b> • <span class="mut">Hits:</span> <b id="hits">0</b> • <span class="mut">Misses:</span> <b id="miss">0</b></div>
+    <div class="row"><span class="mut">Accuracy:</span> <b id="acc">100%</b> • <span class="mut">Streak:</span> <b id="streak">0</b></div>
+    <div class="row"><span class="mut">Targets:</span> <b id="alive">0</b> • <span class="mut">Wave:</span> <b id="wave">1</b></div>
+  </div>
+
+  <div class="topright">
+    Aim with mouse • Left-click to shoot • <span class="hotkey">R</span> restart
+  </div>
+
+  <div id="overlay" class="overlay">
+    <div class="panel">
+      <h2 class="title">★ Товарищ! Test Your Aim ★</h2>
+      <p class="slogan">Gun tracks your pointer. Hits are instant. Smooth as butter. Theme: <b style="color:var(--red)">Nuclear Soviet</b>.</p>
+      <div class="row gap">
+        <div>Session: <select id="dur">
+          <option value="30">30s</option>
+          <option value="45">45s</option>
+          <option value="60" selected>60s</option>
+          <option value="120">120s</option>
+        </select></div>
+        <div>Difficulty: <select id="diff">
+          <option value="1">Cadet</option>
+          <option value="2" selected>Veteran</option>
+          <option value="3">Iron</option>
+        </select></div>
+      </div>
+      <div class="btn" id="start">Commence Training</div>
+      <div class="footer-note">Hitscan (raycast). Beam + muzzle flash are cosmetic.</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let DPR=1, W=0, H=0;
+  function resize(){
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    W = Math.floor(window.innerWidth*DPR); H = Math.floor(window.innerHeight*DPR);
+    cv.width = W; cv.height = H;
+    ctx.setTransform(1,0,0,1,0,0); ctx.scale(DPR, DPR);
+  }
+  window.addEventListener('resize', resize, {passive:true}); resize();
+
+  // UI refs
+  const timeEl=document.getElementById('time'), scoreEl=document.getElementById('score'),
+        hitsEl=document.getElementById('hits'), missEl=document.getElementById('miss'),
+        accEl=document.getElementById('acc'), streakEl=document.getElementById('streak'),
+        aliveEl=document.getElementById('alive'), waveEl=document.getElementById('wave'),
+        overlay=document.getElementById('overlay'), startBtn=document.getElementById('start'),
+        durSel=document.getElementById('dur'), diffSel=document.getElementById('diff');
+
+  const RED = '#d83131', GOLD='#ffcf48', INK='#f6f3f0', MUT='#b89f9f';
+  const GUN = '▄︻テ══━一';
+  const GUYS = ["(ಠ_ಠ)","(⌐■_■)","(ง'̀-'́)ง","(>_<)","(◣_◢)","(ノಠ益ಠ)ノ","(•_•)/","(ಠ‿ಠ)"];
+  const BADGES = ["☢","★","✪","✯","✷"];
+
+  let state=null;
+  const center = ()=>({ x: innerWidth/2, y: innerHeight/2 });
+
+  // Smooth mouse + angle
+  const mouse = { x: innerWidth/2, y: innerHeight/2, sx: innerWidth/2, sy: innerHeight/2 };
+  let targetAng = 0, gunAng = 0;
+
+  window.addEventListener('mousemove', e=>{ mouse.x = e.clientX; mouse.y = e.clientY; });
+  window.addEventListener('contextmenu', e=> e.preventDefault());
+  let mouseDown=false;
+  window.addEventListener('mousedown', e=>{ if(e.button===0){ mouseDown=true; if(!state?.running) startGame(); shoot(); }});
+  window.addEventListener('mouseup', e=>{ if(e.button===0) mouseDown=false; });
+  window.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') startGame(); });
+  startBtn.addEventListener('click', startGame);
+
+  function startGame(){
+    const dur = +durSel.value, diff = +diffSel.value;
+    state = {
+      running:true,
+      t: performance.now(),
+      endAt: performance.now() + dur*1000,
+      left: dur,
+      difficulty: diff,
+      fireCd: 0,
+      fireRate: 90, // faster taps feel good with hitscan
+      beams: [],     // fading beam visuals
+      targets: [],
+      particles: [],
+      score: 0, hits: 0, misses: 0, streak: 0, bestStreak: 0,
+      wave: 1, waveTimer: 0,
+      spawnTimer: 0,
+    };
+    overlay.style.display='none';
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  const rand=(a=0,b=1)=>a+Math.random()*(b-a);
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+  function shoot(){
+    if(!state?.running) return;
+    if(state.fireCd>0) return;
+    state.fireCd = state.fireRate;
+
+    const c = center();
+    const ang = targetAng; // use target angle for immediate feel
+    const dir = { x: Math.cos(ang), y: Math.sin(ang) };
+    const tipOffset = 70;
+    const sx = c.x + dir.x*tipOffset, sy = c.y + dir.y*tipOffset;
+
+    // Raycast to first hit target
+    let best = null, bestT = Infinity;
+    for(const t of state.targets){
+      const bb = textBox(t.txt, t.size, t.x, t.y); // axis-aligned box
+      const res = rayAABB(sx, sy, dir.x, dir.y, bb.x, bb.y, bb.x+bb.w, bb.y+bb.h);
+      if(res && res.tmin >= 0 && res.tmin < bestT){ best = t; bestT = res.tmin; }
+    }
+
+    // Cosmetic beam to screen edge or hit point
+    const maxLen = 2000;
+    const hitX = best ? sx + dir.x*bestT : sx + dir.x*maxLen;
+    const hitY = best ? sy + dir.y*bestT : sy + dir.y*maxLen;
+    state.beams.push({ x1:sx, y1:sy, x2:hitX, y2:hitY, life:140 });
+
+    // Muzzle + hit particles
+    burst(sx, sy, 14, GOLD, 120, 260);
+    if(best){
+      // remove & score
+      const idx = state.targets.indexOf(best);
+      if(idx>=0) state.targets.splice(idx,1);
+      state.hits++; state.streak++; state.bestStreak = Math.max(state.bestStreak, state.streak);
+      const gain = 10 + Math.floor(2*state.wave) + (BADGES.includes(best.txt)?10:0);
+      state.score += gain;
+      burst(hitX, hitY, 26, RED, 220, 420);
+    }else{
+      state.misses++; state.streak = 0;
+    }
+  }
+
+  function burst(x,y,count,color,minV=80, maxV=240){
+    for(let i=0;i<count;i++){
+      const a = rand(0,Math.PI*2), v = rand(minV, maxV);
+      state.particles.push({ x, y, vx: Math.cos(a)*v, vy: Math.sin(a)*v, life: rand(200,600), color });
+    }
+  }
+
+  function spawnTargets(dt){
+    const baseEvery = 650;
+    const mult = (state.difficulty===1?1.1:(state.difficulty===2?1:0.7));
+    const every = Math.max(baseEvery*mult - state.wave*6, 160);
+    state.spawnTimer += dt;
+    while(state.spawnTimer>every){
+      state.spawnTimer -= every;
+      state.targets.push({
+        txt: (Math.random()<.8?GUYS[Math.floor(rand(0,GUYS.length))]:BADGES[Math.floor(rand(0,BADGES.length))]),
+        size: rand(18, 30),
+        x: rand(40, innerWidth-40),
+        y: rand(40, innerHeight-40),
+        vx: rand(-60, 60) * (state.difficulty*0.6),
+        vy: rand(-60, 60) * (state.difficulty*0.6),
+        life: rand(3000, 7000) / (state.difficulty===3?1.1:1),
+        dash: Math.random()<0.22 ? { cd: rand(1200,2400), t:0, mag: 360 + state.wave*6 } : null,
+      });
+    }
+  }
+
+  function updateHUD(){
+    const shots = state.hits + state.misses;
+    const acc = shots? (state.hits/shots*100):100;
+    timeEl.textContent = state.left.toFixed(1);
+    scoreEl.textContent = state.score;
+    hitsEl.textContent = state.hits;
+    missEl.textContent = state.misses;
+    accEl.textContent = `${acc.toFixed(1)}%`;
+    streakEl.textContent = state.streak;
+    aliveEl.textContent = state.targets.length;
+    waveEl.textContent = state.wave;
+  }
+
+  function loop(){
+    if(!state?.running) return;
+    const nt = performance.now(), dt = clamp(nt - state.t, 0, 66); state.t = nt;
+    const dts = dt/1000;
+
+    // smooth crosshair & rotation
+    const lerp = (a,b,t)=>a+(b-a)*t;
+    mouse.sx = lerp(mouse.sx, mouse.x, 1 - Math.pow(0.001, dt/16.7)); // framerate-independent smoothing
+    mouse.sy = lerp(mouse.sy, mouse.y, 1 - Math.pow(0.001, dt/16.7));
+    const c = center();
+    targetAng = Math.atan2(mouse.sy - c.y, mouse.sx - c.x);
+    // shortest-angle lerp
+    const da = Math.atan2(Math.sin(targetAng-gunAng), Math.cos(targetAng-gunAng));
+    gunAng = gunAng + da * (1 - Math.pow(0.0015, dt/16.7));
+
+    // time + waves
+    state.left = clamp((state.endAt - nt)/1000, 0, 999);
+    state.waveTimer += dt;
+    if(Math.floor(state.waveTimer/5500)+1 > state.wave){ state.wave++; }
+    if(state.left<=0){ return gameOver(); }
+
+    // fire cadence
+    state.fireCd = Math.max(0, state.fireCd - dt);
+    if(mouseDown) shoot();
+
+    // targets
+    spawnTargets(dt);
+    for(let i=state.targets.length-1;i>=0;i--){
+      const t = state.targets[i];
+      t.x += t.vx*dts; t.y += t.vy*dts; t.life -= dt;
+      if(t.dash){
+        t.dash.t += dt;
+        if(t.dash.t > t.dash.cd){
+          t.dash.t = 0;
+          const ang = Math.atan2(t.y - c.y, t.x - c.x) + (Math.random()<.5?Math.PI/2:-Math.PI/2);
+          t.vx += Math.cos(ang)*t.dash.mag;
+          t.vy += Math.sin(ang)*t.dash.mag;
+        }
+      }
+      // bounce
+      if(t.x<20){ t.x=20; t.vx=Math.abs(t.vx); }
+      if(t.x>innerWidth-20){ t.x=innerWidth-20; t.vx=-Math.abs(t.vx); }
+      if(t.y<20){ t.y=20; t.vy=Math.abs(t.vy); }
+      if(t.y>innerHeight-20){ t.y=innerHeight-20; t.vy=-Math.abs(t.vy); }
+      if(t.life<=0){ state.misses++; state.streak=0; state.targets.splice(i,1); }
+    }
+
+    // beams fade
+    for(let i=state.beams.length-1;i>=0;i--){
+      const b = state.beams[i];
+      b.life -= dt;
+      if(b.life<=0) state.beams.splice(i,1);
+    }
+
+    // particles
+    for(let i=state.particles.length-1;i>=0;i--){
+      const p = state.particles[i];
+      p.life -= dt;
+      p.x += p.vx*dts; p.y += p.vy*dts; p.vy += 80*dts;
+      if(p.life<=0) state.particles.splice(i,1);
+    }
+
+    draw();
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  function textBox(text, size, x, y){
+    ctx.font = `${size}px ui-monospace, Menlo, Consolas, monospace`;
+    const m = ctx.measureText(text);
+    const h = size*1.1;
+    return { x, y: y - h, w: m.width, h };
+  }
+
+  // Robust ray vs AABB (slabs). Returns {tmin,tmax} or null.
+  function rayAABB(ox,oy, dx,dy, minx,miny, maxx,maxy){
+    const invDx = 1/(dx||1e-9), invDy = 1/(dy||1e-9);
+    let t1 = (minx-ox)*invDx, t2 = (maxx-ox)*invDx;
+    let t3 = (miny-oy)*invDy, t4 = (maxy-oy)*invDy;
+    let tmin = Math.max(Math.min(t1,t2), Math.min(t3,t4));
+    let tmax = Math.min(Math.max(t1,t2), Math.max(t3,t4));
+    if(tmax < 0 || tmin > tmax) return null;
+    return { tmin, tmax };
+  }
+
+  function draw(){
+    // motion-blur background (smoother feel)
+    ctx.fillStyle = 'rgba(13,9,10,0.35)'; // semi-transparent clear
+    ctx.fillRect(0,0,innerWidth,innerHeight);
+
+    // targets
+    for(const t of state.targets){
+      ctx.font = `${t.size}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.fillStyle = BADGES.includes(t.txt) ? GOLD : INK;
+      ctx.fillText(t.txt, t.x, t.y);
+    }
+
+    // beams
+    for(const b of state.beams){
+      const a = Math.max(0, b.life/140);
+      ctx.strokeStyle = `rgba(255,207,72,${0.65*a})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+
+      // glow
+      const g = ctx.createRadialGradient(b.x2,b.y2,0,b.x2,b.y2,18);
+      g.addColorStop(0, `rgba(216,49,49,${0.30*a})`);
+      g.addColorStop(1, 'rgba(216,49,49,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x2,b.y2,18,0,Math.PI*2); ctx.fill();
+    }
+
+    // center rotating ASCII gun (angle-smoothed)
+    const c = center();
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(gunAng);
+    ctx.font = '28px ui-monospace, Menlo, Consolas, monospace';
+    ctx.fillStyle = INK;
+    ctx.fillText(GUN, -52, 10);
+    // tip reticle
+    ctx.fillStyle = RED;
+    ctx.beginPath(); ctx.arc(70, 0, 3, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    // crosshair (smoothed)
+    ctx.save();
+    ctx.translate(mouse.sx, mouse.sy);
+    ctx.strokeStyle = 'rgba(255,207,72,.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-6,0); ctx.moveTo(6,0); ctx.lineTo(18,0);
+    ctx.moveTo(0,-18); ctx.lineTo(0,-6); ctx.moveTo(0,6); ctx.lineTo(0,18); ctx.stroke();
+    ctx.restore();
+
+    // vignette ring
+    const r = Math.min(innerWidth, innerHeight)*0.55;
+    const vg = ctx.createRadialGradient(innerWidth/2, innerHeight/2, r*0.6, innerWidth/2, innerHeight/2, r);
+    vg.addColorStop(0, 'rgba(216,49,49,0)');
+    vg.addColorStop(1, 'rgba(216,49,49,.10)');
+    ctx.fillStyle = vg; ctx.fillRect(0,0,innerWidth,innerHeight);
+  }
+
+  function gameOver(){
+    state.running=false;
+    const shots = state.hits + state.misses;
+    const acc = shots? (state.hits/shots*100):100;
+    overlay.innerHTML = `
+      <div class="panel">
+        <h2 class="title">Training Complete</h2>
+        <p class="slogan">Score <b>${state.score}</b> • Hits <b>${state.hits}</b> • Misses <b>${state.misses}</b> • Accuracy <b>${acc.toFixed(1)}%</b> • Best Streak <b>${state.bestStreak}</b></p>
+        <div class="btn" id="again">Run It Back (R)</div>
+      </div>`;
+    overlay.style.display='grid';
+    document.getElementById('again').addEventListener('click', startGame);
+  }
+
+  // idle title background (static emblem under motion blur)
+  let idleT = performance.now();
+  function idle(){
+    if(state?.running) return;
+    const t = performance.now(), dt = t - idleT; idleT = t;
+    ctx.fillStyle = 'rgba(13,9,10,1)';
+    ctx.fillRect(0,0,innerWidth,innerHeight);
+    ctx.globalAlpha = .06;
+    ctx.font = '180px ui-monospace, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#ffcf48';
+    ctx.fillText('☢', innerWidth/2-60, innerHeight/2+60);
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(idle);
+  }
+  idle();
+})();
+</script>
+</body>
+</html>

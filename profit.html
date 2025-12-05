@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Transaction Profit Calculator</title>
+  <style>
+    :root{
+      --bg:#121212;--panel:#1b1b1b;--border:#2a2a2a;--fg:#e8e8e8;--muted:#bdbdbd;
+      --accent:#3b82f6;--accent-hover:#2563eb;--success:#22c55e;--danger:#ef4444;
+      --radius:12px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{
+      background:var(--bg);color:var(--fg);
+      font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      display:flex;justify-content:center;padding:24px
+    }
+    .container{
+      width:min(1200px,100%);background:var(--panel);
+      border:1px solid var(--border);border-radius:var(--radius);
+      padding:24px;box-shadow:0 6px 18px rgba(0,0,0,.35)
+    }
+    h1{margin:0 0 6px;text-align:center}
+    p.sub{margin:0 0 20px;text-align:center;color:#cfcfcf}
+
+    .grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px}
+    .input-group label{display:block;margin:0 0 6px;color:var(--muted);font-weight:600}
+    input[type="file"],select{
+      width:100%;padding:10px;border-radius:10px;
+      background:#232323;border:1px solid #3a3a3a;color:#e6e6e6
+    }
+    input[type="file"]::file-selector-button{
+      border:none;padding:.5em .8em;border-radius:.5em;
+      background:var(--accent);color:#fff;cursor:pointer
+    }
+    input[type="file"]::file-selector-button:hover{background:var(--accent-hover)}
+    button.primary{
+      margin-top:26px;width:100%;padding:12px 14px;border:none;
+      border-radius:12px;background:var(--accent);color:#fff;
+      font-weight:700;cursor:pointer
+    }
+    button.primary:hover{background:var(--accent-hover)}
+
+    section{margin-top:22px}
+    h2{margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--border)}
+    #results{
+      background:#0b0b0b;color:#f0f0f0;padding:12px;border-radius:10px;
+      border:1px solid #333;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+      white-space:pre-wrap
+    }
+    .flex{display:flex;gap:16px;flex-wrap:wrap}
+    .card{
+      flex:1 1 320px;background:#111;border:1px solid #2a2a2a;
+      border-radius:12px;padding:14px
+    }
+    .card h3{margin:0 0 6px;font-size:1.05rem}
+    .grand{font-size:1.6rem;font-weight:800;margin-top:8px}
+    .row{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:6px 0;border-bottom:1px dashed #242424
+    }
+    .row:last-child{border-bottom:0}
+    .q{opacity:.9}
+    .v{font-variant-numeric:tabular-nums}
+    .pos{color:var(--success)} .neg{color:var(--danger)}
+
+    .chart-wrap{
+      background:#0b0b0b;border:1px solid #2a2a2a;
+      border-radius:12px;padding:16px
+    }
+    canvas{width:100%;height:360px}
+
+    .table-tools{
+      display:flex;gap:12px;align-items:center;
+      justify-content:space-between;margin:10px 0 8px;flex-wrap:wrap
+    }
+    .search{flex:1;min-width:240px}
+    .search input{
+      width:100%;padding:10px;border-radius:10px;
+      border:1px solid #3a3a3a;background:#191919;color:#eaeaea
+    }
+    .table-wrap{overflow:auto;border:1px solid #2a2a2a;border-radius:12px}
+    table{width:100%;border-collapse:separate;border-spacing:0}
+    thead th{
+      position:sticky;top:0;background:#171717;color:#eaeaea;
+      text-align:left;padding:10px;font-weight:700;border-bottom:1px solid #2a2a2a;
+      cursor:pointer;user-select:none
+    }
+    tbody td{padding:10px;border-bottom:1px solid #222}
+    tfoot td{
+      padding:10px;background:#121212;border-top:2px solid #2a2a2a;font-weight:700
+    }
+    tr:hover td{background:#151515}
+    .num{text-align:right;white-space:nowrap}
+    .muted{color:#b8b8b8}
+    .pill{
+      display:inline-block;padding:2px 8px;border-radius:999px;
+      border:1px solid #2a2a2a;background:#101010
+    }
+    .warn{color:#facc15;font-size:.85rem;margin-top:4px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Transaction Profit Calculator 🪙</h1>
+    <p class="sub">Select your deposits and withdrawals CSV files.</p>
+
+    <div class="grid">
+      <div class="input-group">
+        <label for="depositsFile">Deposits CSV</label>
+        <input type="file" id="depositsFile" accept=".csv"/>
+      </div>
+      <div class="input-group">
+        <label for="withdrawalsFile">Withdrawals CSV</label>
+        <input type="file" id="withdrawalsFile" accept=".csv"/>
+      </div>
+      <div class="input-group">
+        <label for="fiatCurrency">Fiat Currency (historical via Binance)</label>
+        <select id="fiatCurrency">
+          <option value="usd" selected>US Dollar (USD)</option>
+        </select>
+      </div>
+      <div class="input-group" style="align-self:end">
+        <button id="calculateBtn" class="primary">Calculate &amp; Fetch Historical Prices</button>
+      </div>
+    </div>
+
+    <!-- Totals / Breakdown -->
+    <section>
+      <h2>Totals</h2>
+      <div class="flex">
+        <div class="card" id="grandCard">
+          <h3>Realized Net (Historical)</h3>
+          <div class="grand" id="grandTotal">—</div>
+          <div class="muted" id="priceTimestamp"></div>
+          <div class="warn" id="fiatWarning"></div>
+        </div>
+        <div class="card">
+          <h3>Total Deposits (Fiat, historical)</h3>
+          <div class="grand" id="totalDepositsFiat">—</div>
+          <div class="muted" id="totalDepositsNote">Outflow (valued at date of deposit)</div>
+        </div>
+        <div class="card">
+          <h3>Total Withdrawals (Fiat, historical)</h3>
+          <div class="grand" id="totalWithdrawalsFiat">—</div>
+          <div class="muted" id="totalWithdrawalsNote">Inflow (valued at date of withdrawal)</div>
+        </div>
+        <div class="card" id="breakdownCard">
+          <h3>Net by Currency</h3>
+          <div id="breakdownRows"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Profit over time -->
+    <section>
+      <h2>Cumulative Profit Over Time</h2>
+      <div class="chart-wrap">
+        <canvas id="dailyChart" aria-label="Cumulative profit over time"></canvas>
+      </div>
+      <div class="pill" style="margin-top:8px">Historical daily close from Binance (per transaction date)</div>
+    </section>
+
+    <!-- Combined per-currency prices -->
+    <section>
+      <h2>Crypto Prices Over Time (Debug)</h2>
+      <p class="muted">Each line is a different coin using the Binance prices we actually fetched.</p>
+      <div class="chart-wrap">
+        <canvas id="cryptoPriceChart" aria-label="Per-currency historical prices"></canvas>
+      </div>
+    </section>
+
+    <!-- Per-Day Table -->
+    <section>
+      <h2>Per-Day Totals (Historical Fiat)</h2>
+      <div class="table-tools">
+        <div class="search"><input id="tableSearch" placeholder="Search date or amount…"/></div>
+        <div class="muted">Tip: click a column header to sort</div>
+      </div>
+      <div class="table-wrap">
+        <table id="dailyTable">
+          <thead>
+            <tr>
+              <th data-key="date">Date</th>
+              <th class="num" data-key="dep">Deposits (Fiat)</th>
+              <th class="num" data-key="wdr">Withdrawals (Fiat)</th>
+              <th class="num" data-key="net">Net (Fiat)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <td class="num">Totals:</td>
+              <td class="num" id="tableTotalDep">—</td>
+              <td class="num" id="tableTotalWdr">—</td>
+              <td class="num" id="tableTotalNet">—</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Raw Summary</h2>
+      <pre id="results">Your results will appear here…</pre>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script>
+    // Symbol -> Binance USDT pair (for historical USD prices)
+    const symbolToBinancePair = {
+      'ADA':'ADAUSDT','APE':'APEUSDT','BCH':'BCHUSDT','BNB':'BNBUSDT','BTC':'BTCUSDT','BUSD':'BUSDUSDT',
+      'CRO':'CROUSDT','DAI':'DAIUSDT','DOGE':'DOGEUSDT','DOT':'DOTUSDT','EOS':'EOSUSDT','ETH':'ETHUSDT',
+      'LINK':'LINKUSDT','LTC':'LTCUSDT','MATIC':'MATICUSDT','POL':'POLUSDT','SAND':'SANDUSDT',
+      'SHIB':'SHIBUSDT','SOL':'SOLUSDT','TRUMP':'TRUMPUSDT','TRX':'TRXUSDT','UNI':'UNIUSDT',
+      'USDC':'USDCUSDT','USDT':'USDTUSDT','XRP':'XRPUSDT'
+    };
+
+    const el = id => document.getElementById(id);
+    const resultsEl = el('results');
+    const priceTsEl = el('priceTimestamp');
+    const grandEl = el('grandTotal');
+    const breakdownRowsEl = el('breakdownRows');
+    const fiatWarningEl = el('fiatWarning');
+
+    const tableTotalDepEl = el('tableTotalDep');
+    const tableTotalWdrEl = el('tableTotalWdr');
+    const tableTotalNetEl = el('tableTotalNet');
+
+    const totalDepositsFiatEl = el('totalDepositsFiat');
+    const totalWithdrawalsFiatEl = el('totalWithdrawalsFiat');
+
+    let profitChart;          // main profit chart
+    let priceChart;           // combined per-currency price chart
+    const historicalPriceCache = {}; // key: SYMBOL|YYYY-MM-DD|fiat -> price
+
+    el('calculateBtn').addEventListener('click', handleCalculation);
+    el('tableSearch').addEventListener('input', handleSearch);
+
+    async function handleCalculation(){
+      const dep = el('depositsFile').files[0];
+      const wdr = el('withdrawalsFile').files[0];
+      let fiat = el('fiatCurrency').value.toLowerCase();
+
+      if(!dep || !wdr){
+        resultsEl.textContent='⚠️ Please select both a deposits and a withdrawals file.';
+        console.warn('Missing deposits or withdrawals file.');
+        return;
+      }
+
+      // Only USD has correct historical Binance mapping for now
+      fiatWarningEl.textContent = '';
+      if(fiat !== 'usd'){
+        fiatWarningEl.textContent = 'Historical pricing currently uses USD via Binance. NOK/EUR selections are treated as USD.';
+        fiat = 'usd';
+        el('fiatCurrency').value = 'usd';
+      }
+
+      try{
+        console.log('Reading CSV files…');
+        resultsEl.textContent = 'Processing files…';
+        const [depText, wdrText] = await Promise.all([readFile(dep), readFile(wdr)]);
+        const depositsRows = parseCSV(depText);
+        const withdrawalsRows = parseCSV(wdrText);
+        console.log('Parsed deposits rows:', depositsRows.length, 'withdrawals rows:', withdrawalsRows.length);
+
+        // Aggregates in crypto units
+        const totalsByCurrencyNet = {}; // withdrawals (+) minus deposits (−)
+        const totalsByCurrencyDep = {}; // absolute deposits
+        const totalsByCurrencyWdr = {}; // absolute withdrawals
+
+        // Collect (symbol,date) combos we need prices for
+        const uniqueCombos = new Set();
+
+        for(const r of depositsRows){
+          bump(totalsByCurrencyNet, r.currency, -r.amount);
+          bump(totalsByCurrencyDep, r.currency, +r.amount);
+          uniqueCombos.add(`${r.currency}|${r.date}`);
+        }
+        for(const r of withdrawalsRows){
+          bump(totalsByCurrencyNet, r.currency, +r.amount);
+          bump(totalsByCurrencyWdr, r.currency, +r.amount);
+          uniqueCombos.add(`${r.currency}|${r.date}`);
+        }
+
+        console.log('Unique (symbol,date) combos needing prices:', uniqueCombos.size);
+        console.log('Combos sample:', Array.from(uniqueCombos).slice(0,20));
+
+        // Fetch prices from Binance
+        resultsEl.textContent = 'Fetching historical prices from Binance (this may take a bit)…';
+
+        const comboArray = Array.from(uniqueCombos);
+        await Promise.all(comboArray.map(async key=>{
+          const [sym,date] = key.split('|');
+          try{
+            await getHistoricalPrice(sym, date, fiat);
+          }catch(e){
+            console.error('Error fetching price for', sym, date, e);
+          }
+        }));
+
+        console.log('Historical price cache after fetch:', historicalPriceCache);
+
+        // Convert to fiat by day
+        const perDayDepFiat = {}; // { date: fiatValue }
+        const perDayWdrFiat = {}; // { date: fiatValue }
+        let sumDepFiat = 0;
+        let sumWdrFiat = 0;
+
+        for(const r of depositsRows){
+          const price = getCachedPrice(r.currency, r.date, fiat);
+          const fiatVal = r.amount * price;
+          sumDepFiat += fiatVal;
+          bump(perDayDepFiat, r.date, fiatVal);
+        }
+
+        for(const r of withdrawalsRows){
+          const price = getCachedPrice(r.currency, r.date, fiat);
+          const fiatVal = r.amount * price;
+          sumWdrFiat += fiatVal;
+          bump(perDayWdrFiat, r.date, fiatVal);
+        }
+
+        const sumNetFiat = sumWdrFiat - sumDepFiat;
+
+        // Build arrays of daily values
+        const datesSet = new Set([
+          ...Object.keys(perDayDepFiat),
+          ...Object.keys(perDayWdrFiat)
+        ]);
+        const dates = Array.from(datesSet).sort();
+        const dailyDep = [];
+        const dailyWdr = [];
+        const dailyNet = [];
+
+        for(const d of dates){
+          const depFiat = perDayDepFiat[d] || 0;
+          const wdrFiat = perDayWdrFiat[d] || 0;
+          dailyDep.push({date:d, fiat:depFiat});
+          dailyWdr.push({date:d, fiat:wdrFiat});
+          dailyNet.push({date:d, fiat:(wdrFiat - depFiat)});
+        }
+
+        console.log('DailyDep sample:', dailyDep.slice(0,10));
+        console.log('DailyWdr sample:', dailyWdr.slice(0,10));
+        console.log('DailyNet sample:', dailyNet.slice(0,10));
+
+        // Summary text
+        const fiatUpper = fiat.toUpperCase();
+        let out = `Historical valuation using Binance daily close (approximate, UTC).\nFiat: ${fiatUpper}\n\n`;
+        out += `Total Deposits: ${totalToMoney(sumDepFiat, fiat)}\n`;
+        out += `Total Withdrawals: ${totalToMoney(sumWdrFiat, fiat)}\n`;
+        out += `Realized Net (Withdrawals - Deposits): ${totalToMoney(sumNetFiat, fiat)}\n\n`;
+        out += `Net by Currency (crypto units):\n\n`;
+        const syms = Object.keys(totalsByCurrencyNet).sort();
+        for(const sym of syms){
+          out += `${sym}: ${totalsByCurrencyNet[sym].toFixed(8)}\n`;
+        }
+        resultsEl.textContent = out;
+
+        // Totals (cards)
+        totalDepositsFiatEl.textContent = totalToMoney(sumDepFiat, fiat);
+        totalWithdrawalsFiatEl.textContent = totalToMoney(sumWdrFiat, fiat);
+        grandEl.textContent = totalToMoney(sumNetFiat, fiat);
+
+        // Profit chart
+        const cumNet = toCumulative(dailyNet);
+        drawProfitChart(cumNet, fiat);
+
+        // Table
+        buildTable(dailyDep, dailyWdr, dailyNet, fiat);
+        tableTotalDepEl.textContent = totalToMoney(sumDepFiat, fiat);
+        tableTotalWdrEl.textContent = totalToMoney(sumWdrFiat, fiat);
+        tableTotalNetEl.textContent = totalToMoney(sumNetFiat, fiat);
+
+        // Breakdown card
+        renderGrandBreakdown(totalsByCurrencyNet, fiat);
+
+        // Combined per-currency price chart
+        renderPerCurrencyPriceChart(fiat);
+
+        priceTsEl.textContent = 'Valued using Binance daily close for each transaction date (UTC).';
+      }catch(err){
+        console.error('Top-level handleCalculation error:', err);
+        resultsEl.textContent = `An error occurred: ${err.message}`;
+      }
+    }
+
+    /* ---------- helpers ---------- */
+    function bump(map, key, delta){
+      if(!key) return;
+      map[key] = (map[key] ?? 0) + delta;
+    }
+
+    function normalizeDate(s){
+      const d = new Date(s);
+      if(isNaN(d)) return (s||'').trim().slice(0,10);
+      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function parseCSV(csvText){
+      const lines = csvText.trim().split(/\r?\n/);
+      if(!lines.length) return [];
+      lines.shift(); // header
+      const rows=[];
+      for(const line of lines){
+        if(!line.trim()) continue;
+        const parts=smartSplit(line);
+        const date=normalizeDate(parts[0]??'');
+        const amount=parseFloat((parts[1]??'').replace(/,/g,'')); // allow "1,234.56"
+        const currency=(parts[2]??'').trim().toUpperCase();
+        if(!currency || Number.isNaN(amount)) continue;
+        rows.push({date,amount,currency});
+      }
+      return rows;
+    }
+
+    function smartSplit(line){
+      const out=[];let cur='';let q=false;
+      for(let i=0;i<line.length;i++){
+        const c=line[i];
+        if(c === '"'){
+          if(q && line[i+1]==='"'){cur+='"';i++;}
+          else {q=!q;}
+        }else if(c===',' && !q){
+          out.push(cur);cur='';
+        }else cur+=c;
+      }
+      out.push(cur); return out;
+    }
+
+    function isStableOrFiat(symbol, fiat){
+      const s = symbol.toUpperCase();
+      const f = fiat.toUpperCase();
+      if(s === f) return true;
+      if(['USDT','USDC','BUSD','DAI','FDUSD','TUSD','USD'].includes(s) && f === 'USD') return true;
+      return false;
+    }
+
+    function getCachedPrice(symbol, date, fiat){
+      const key = `${symbol.toUpperCase()}|${date}|${fiat.toLowerCase()}`;
+      return historicalPriceCache[key] ?? 0;
+    }
+
+    async function getHistoricalPrice(symbol, date, fiat){
+      const sym = symbol.toUpperCase();
+      const key = `${sym}|${date}|${fiat.toLowerCase()}`;
+      if(historicalPriceCache[key] != null){
+        return historicalPriceCache[key];
+      }
+
+      // Stablecoins / same fiat: treat as 1:1
+      if(isStableOrFiat(sym, fiat)){
+        historicalPriceCache[key] = 1;
+        console.log(`Stable/fiat mapping used for ${key} -> 1`);
+        return 1;
+      }
+
+      const pair = symbolToBinancePair[sym];
+      if(!pair){
+        console.warn('No Binance pair mapping for symbol:', sym, 'on', date, '-> assuming price 0');
+        historicalPriceCache[key] = 0;
+        return 0;
+      }
+
+      const [y,m,d] = date.split('-').map(Number);
+      if(!y || !m || !d){
+        console.warn('Bad date for historical price:', sym, date);
+        historicalPriceCache[key] = 0;
+        return 0;
+      }
+      const startTime = Date.UTC(y, m-1, d); // 00:00 UTC for that day
+
+      const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${startTime}&limit=1`;
+      try{
+        const r = await fetch(url);
+        if(!r.ok){
+          console.error('Binance klines fetch failed for', pair, date, 'status:', r.status);
+          historicalPriceCache[key] = 0;
+          return 0;
+        }
+        const data = await r.json();
+        if(!Array.isArray(data) || !data.length){
+          console.error('No kline data for', pair, date, 'response:', data);
+          historicalPriceCache[key] = 0;
+          return 0;
+        }
+        const close = parseFloat(data[0][4]); // close price
+        historicalPriceCache[key] = Number.isFinite(close) ? close : 0;
+        console.log(`Price resolved for ${key}:`, historicalPriceCache[key]);
+        return historicalPriceCache[key];
+      }catch(err){
+        console.error('Network/parse error fetching klines for', pair, date, err);
+        historicalPriceCache[key] = 0;
+        return 0;
+      }
+    }
+
+    function toCumulative(daily){
+      let run=0;
+      return daily.map(r=>({date:r.date, fiat:(run+=r.fiat)}));
+    }
+
+    // main profit chart: cumulative net only
+    function drawProfitChart(cumNet, fiat){
+      const labels = cumNet.map(r=>r.date);
+      const dataNet = cumNet.map(r=>r.fiat);
+
+      const ctx = document.getElementById('dailyChart').getContext('2d');
+      if(profitChart) profitChart.destroy();
+      profitChart = new Chart(ctx,{
+        type:'line',
+        data:{
+          labels,
+          datasets:[
+            {
+              label:`Cumulative Profit (${fiat.toUpperCase()})`,
+              data:dataNet,
+              tension:.25,
+              fill:true
+            }
+          ]
+        },
+        options:{
+          responsive:true, maintainAspectRatio:false,
+          scales:{
+            x:{ grid:{color:'#222'}, ticks:{color:'#cfcfcf'} },
+            y:{
+              grid:{color:'#222'},
+              ticks:{
+                color:'#cfcfcf',
+                callback:v=>totalToMoney(v,fiat)
+              }
+            }
+          },
+          plugins:{
+            legend:{ labels:{ color:'#eaeaea' } },
+            tooltip:{ callbacks:{ label:(ctx)=>` ${totalToMoney(ctx.parsed.y, fiat)}` } }
+          }
+        }
+      });
+    }
+
+    // one chart, multiple symbols, over all dates we fetched
+    function renderPerCurrencyPriceChart(fiat){
+      const fiatKey = fiat.toLowerCase();
+      const seriesMap = {}; // sym -> [{date, price}, ...]
+
+      for(const key in historicalPriceCache){
+        const [sym,date,f] = key.split('|');
+        if(f !== fiatKey) continue;
+        if(!seriesMap[sym]) seriesMap[sym]=[];
+        seriesMap[sym].push({date,price:historicalPriceCache[key]});
+      }
+
+      const symbols = Object.keys(seriesMap).sort();
+      console.log('Building combined price chart for symbols:', symbols);
+
+      if(!symbols.length){
+        console.warn('No symbols found for price chart.');
+        if(priceChart) priceChart.destroy();
+        return;
+      }
+
+      // union of all dates across all symbols
+      const dateSet = new Set();
+      symbols.forEach(sym=>{
+        seriesMap[sym].forEach(s=>dateSet.add(s.date));
+      });
+      const labels = Array.from(dateSet).sort();
+
+      const datasets = symbols.map(sym=>{
+        const byDate = {};
+        seriesMap[sym].forEach(s=>{ byDate[s.date]=s.price; });
+        const data = labels.map(d => (d in byDate ? byDate[d] : null));
+        return {
+          label: sym,
+          data,
+          tension:.2,
+          fill:false
+        };
+      });
+
+      const ctx = document.getElementById('cryptoPriceChart').getContext('2d');
+      if(priceChart) priceChart.destroy();
+      priceChart = new Chart(ctx,{
+        type:'line',
+        data:{ labels, datasets },
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          scales:{
+            x:{
+              grid:{color:'#222'},
+              ticks:{color:'#cfcfcf', maxRotation:45, minRotation:45}
+            },
+            y:{
+              grid:{color:'#222'},
+              ticks:{color:'#cfcfcf'}
+            }
+          },
+          plugins:{
+            legend:{ labels:{ color:'#eaeaea' } },
+            tooltip:{
+              callbacks:{
+                label:(ctx)=>` ${ctx.dataset.label}: ${ctx.parsed.y}`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function buildTable(dailyDep, dailyWdr, dailyNet, fiat){
+      const tbody = document.querySelector('#dailyTable tbody');
+      tbody.innerHTML='';
+
+      const set = new Set([
+        ...dailyDep.map(d=>d.date),
+        ...dailyWdr.map(d=>d.date),
+        ...dailyNet.map(d=>d.date)
+      ]);
+      const rows = Array.from(set).sort((a,b)=>b.localeCompare(a)).map(date=>{
+        const dep = dailyDep.find(d=>d.date===date)?.fiat || 0;
+        const wdr = dailyWdr.find(d=>d.date===date)?.fiat || 0;
+        const net = dailyNet.find(d=>d.date===date)?.fiat || (wdr - dep);
+        return {date, dep, wdr, net};
+      });
+
+      rows.forEach(row=>{
+        const tr=document.createElement('tr');
+        const tdDate=document.createElement('td'); tdDate.textContent=row.date;
+        const tdDep=document.createElement('td'); tdDep.textContent=totalToMoney(row.dep,fiat); tdDep.className='num';
+        const tdWdr=document.createElement('td'); tdWdr.textContent=totalToMoney(row.wdr,fiat); tdWdr.className='num';
+        const tdNet=document.createElement('td'); tdNet.textContent=totalToMoney(row.net,fiat); tdNet.className='num';
+        tr.append(tdDate,tdDep,tdWdr,tdNet); tbody.appendChild(tr);
+      });
+
+      setupSorting(); handleSearch();
+    }
+
+    function renderGrandBreakdown(totalsByCurrencyNet, fiat){
+      breakdownRowsEl.innerHTML='';
+      const syms = Object.keys(totalsByCurrencyNet).sort();
+      for(const sym of syms){
+        const qty = totalsByCurrencyNet[sym];
+        let lastPrice = null;
+        const prefix = sym.toUpperCase() + '|';
+        const suffix = '|' + fiat.toLowerCase();
+        for(const key in historicalPriceCache){
+          if(key.startsWith(prefix) && key.endsWith(suffix)){
+            lastPrice = historicalPriceCache[key];
+          }
+        }
+        const fiatVal = lastPrice==null ? null : qty * lastPrice;
+        const row=document.createElement('div'); row.className='row';
+        const left=document.createElement('div');
+        left.innerHTML = `<strong>${sym}</strong> <span class="q">${qty.toFixed(8)}</span>`;
+        const right=document.createElement('div');
+        right.className='v ' + (fiatVal != null && fiatVal >= 0 ? 'pos' : 'neg');
+        right.textContent = fiatVal==null ? '—' : totalToMoney(fiatVal,fiat);
+        row.append(left,right); breakdownRowsEl.appendChild(row);
+      }
+    }
+
+    function handleSearch(){
+      const q = el('tableSearch').value.trim().toLowerCase();
+      const rows = Array.from(document.querySelectorAll('#dailyTable tbody tr'));
+      for(const r of rows){
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+      }
+    }
+
+    function setupSorting(){
+      const thead=document.querySelector('#dailyTable thead');
+      const tbody=document.querySelector('#dailyTable tbody');
+      thead.querySelectorAll('th').forEach(th=>{
+        th.onclick=()=>{
+          const key=th.getAttribute('data-key');
+          const cur=th.getAttribute('data-order')||'desc';
+          const next = cur==='asc'?'desc':'asc';
+          thead.querySelectorAll('th').forEach(h=>h.removeAttribute('data-order'));
+          th.setAttribute('data-order',next);
+          const rows=[...tbody.querySelectorAll('tr')];
+          const idx = {date:0, dep:1, wdr:2, net:3}[key] ?? 0;
+          rows.sort((a,b)=>{
+            const av=a.children[idx].textContent;
+            const bv=b.children[idx].textContent;
+            const isNum = idx>0;
+            if(isNum){
+              const an=parseFloat(av.replace(/[^\d.-]/g,''))||0;
+              const bn=parseFloat(bv.replace(/[^\d.-]/g,''))||0;
+              return next==='asc'?an-bn:bn-an;
+            }else{
+              return next==='asc'?av.localeCompare(bv):bv.localeCompare(av);
+            }
+          });
+          tbody.innerHTML=''; rows.forEach(r=>tbody.appendChild(r));
+        };
+      });
+    }
+
+    function totalToMoney(v, fiat){
+      return (v??0).toLocaleString(undefined,{style:'currency',currency:fiat.toUpperCase()});
+    }
+
+    function readFile(file){
+      return new Promise((res,rej)=>{
+        const fr=new FileReader();
+        fr.onload=e=>res(e.target.result);
+        fr.onerror=rej;
+        fr.readAsText(file);
+      });
+    }
+  </script>
+</body>
+</html>

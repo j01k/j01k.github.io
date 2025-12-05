@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>USD ⇄ Multi-Currency Converter</title>
+<style>
+  :root {
+    --bg:#0f1220; --card:#151a2e; --muted:#8fa0c2; --text:#e8eeff;
+    --accent:#4cc38a; --danger:#ff6b6b; --warn:#f7b955; --radius:14px;
+  }
+
+  body {
+    margin:0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
+    background: radial-gradient(1200px 600px at 70% -10%, #1b2140 20%, #0e1327 60%, #0b0f1f 100%), var(--bg);
+    color: var(--text);
+    min-height:100vh;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    padding-top:40px;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 1300px;
+    padding: 0 20px;
+  }
+
+  .card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: var(--radius);
+    box-shadow: 0 16px 32px rgba(0,0,0,0.35);
+  }
+
+  header {
+    padding: 14px 18px;
+    background: rgba(255,255,255,0.04);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+
+  header h1 {
+    margin:0;
+    font-size: 20px;
+    font-weight:650;
+  }
+
+  .btn {
+    padding:6px 10px;
+    border-radius:8px;
+    background:#1e2438;
+    border:1px solid rgba(255,255,255,0.15);
+    color:var(--text);
+    cursor:pointer;
+    font-size:12px;
+    font-weight:600;
+  }
+  .btn:hover { border-color:#4cc38a; }
+
+  .statusbar {
+    padding: 8px 16px;
+    font-size:12px;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+
+  .dot {
+    width:10px;height:10px;border-radius:50%;
+    background:var(--warn);
+  }
+  .ok .dot { background:var(--accent); }
+  .err .dot { background:var(--danger); }
+  .statusbar span { color:var(--muted); }
+
+  .rows {
+    padding: 12px 14px 16px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+
+  .row {
+    flex: 1 1 580px;
+    display:grid;
+    grid-template-columns: 100px 1fr 160px;
+    gap: 12px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .row.usd {
+    background: rgba(76,195,138,0.12);
+    border-color: rgba(76,195,138,0.4);
+  }
+
+  .code { font-weight:700; font-size:13px; }
+  .name { color:var(--muted); font-size:11px; margin-top:2px; }
+
+  input {
+    width:100%;
+    padding: 7px 10px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color:var(--text);
+    font-size:16px;
+  }
+
+  input:focus {
+    border-color:var(--accent);
+    outline:none;
+    box-shadow:0 0 0 3px rgba(76,195,138,0.2);
+  }
+
+  .rate {
+    font-size:12px;
+    color:var(--muted);
+    text-align:right;
+    white-space:nowrap;
+  }
+
+  .hint {
+    font-size:12px;
+    color:var(--muted);
+    padding:0 18px 16px;
+  }
+
+  .warn {
+    color: var(--danger);
+    font-size: 12px;
+    padding: 8px 18px 14px;
+    display:none;
+    white-space:pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="card">
+
+    <header>
+      <h1>USD ⇄ Currency Converter</h1>
+      <button id="refresh" class="btn">Refresh rates</button>
+    </header>
+
+    <div id="status" class="statusbar">
+      <div class="dot"></div>
+      <span id="statustext">Initializing…</span>
+      <span id="asof"></span>
+    </div>
+
+    <div id="rows" class="rows"></div>
+    <div id="warn" class="warn"></div>
+
+    <div class="hint">
+      Editing <b>USD</b> updates all other currencies. Editing any other row only updates that row’s USD conversion on the right.
+    </div>
+  </div>
+</div>
+
+<script>
+// === Config ===
+const CURRENCIES = [
+  ["USD","US Dollar"],
+  ["EUR","Euro"],
+  ["VND","Vietnamese Dong"],
+  ["TRY","Turkish Lira"],
+  ["RUB","Russian Ruble"],
+  ["PLN","Polish Złoty"],
+  ["PHP","Philippine Peso"],
+  ["PEN","Peruvian Sol"],
+  ["NGN","Nigerian Naira"],
+  ["MXN","Mexican Peso"],
+  ["KRW","South Korean Won"],
+  ["JPY","Japanese Yen"],
+  ["INR","Indian Rupee"],
+  ["IDR","Indonesian Rupiah"],
+  ["CNY","Chinese Yuan"],
+  ["CLP","Chilean Peso"],
+  ["CAD","Canadian Dollar"],
+  ["ARS","Argentine Peso"],
+];
+
+const ZERO_FRAC_CODES = new Set(["VND","KRW","JPY","CLP","IDR"]);
+
+const statusBar = document.getElementById("status");
+const statusText = document.getElementById("statustext");
+const asof = document.getElementById("asof");
+const warn = document.getElementById("warn");
+const refreshBtn = document.getElementById("refresh");
+const rowsEl = document.getElementById("rows");
+
+let rates = Object.create(null); // 1 USD = rates[CODE]
+let lastFetchISO = null;
+const inputs = new Map();        // code -> input
+const usdSpans = new Map();      // code -> span showing USD equivalent
+
+// === Helpers ===
+function setStatus(kind, text) {
+  statusBar.classList.remove("ok","err");
+  if (kind === "ok") statusBar.classList.add("ok");
+  if (kind === "err") statusBar.classList.add("err");
+  statusText.textContent = text;
+}
+
+function fmtNumber(n, code) {
+  if (!Number.isFinite(n)) return "";
+  if (ZERO_FRAC_CODES.has(code)) {
+    return Math.round(n).toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    });
+  }
+  const isInt = Number.isInteger(n);
+  const minFrac = isInt ? 0 : 2;
+  const maxFrac = isInt ? 0 : 2;
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: minFrac,
+    maximumFractionDigits: maxFrac,
+  });
+}
+
+function parseNum(s) {
+  const clean = String(s ?? "").replace(/,/g,"").trim();
+  if (!clean) return NaN;
+  return Number(clean);
+}
+
+// === UI build ===
+function buildUI() {
+  rowsEl.innerHTML = "";
+  for (const [code, name] of CURRENCIES) {
+    const row = document.createElement("div");
+    row.className = "row" + (code === "USD" ? " usd" : "");
+
+    const left = document.createElement("div");
+    left.innerHTML = `<div class="code">${code}</div><div class="name">${name}</div>`;
+
+    const mid = document.createElement("div");
+    const input = document.createElement("input");
+    input.type = "text";
+    input.autocomplete = "off";
+    input.inputMode = "decimal";
+    input.dataset.code = code;
+    if (code === "USD") input.placeholder = "Enter USD amount";
+    mid.appendChild(input);
+
+    const right = document.createElement("div");
+    right.className = "rate";
+    const span = document.createElement("span");
+    span.textContent = "—";
+    right.appendChild(span);
+
+    row.appendChild(left);
+    row.appendChild(mid);
+    row.appendChild(right);
+    rowsEl.appendChild(row);
+
+    inputs.set(code, input);
+    usdSpans.set(code, span);
+
+    // Prevent scroll-wheel from changing value accidentally
+    input.addEventListener("wheel", e => {
+      if (e.target === document.activeElement) e.preventDefault();
+    }, { passive:false });
+
+    input.addEventListener("input", onInput);
+  }
+}
+
+// === Logic ===
+// Update all other rows from a base USD value.
+// skipCode: field we should NOT touch (so typing stays smooth).
+function updateAllFromUSD(baseUsd, skipCode) {
+  if (!rates || !rates.USD) return;
+  if (!Number.isFinite(baseUsd)) return;
+
+  // update inputs
+  for (const [code, input] of inputs) {
+    if (code === skipCode) continue;
+    if (code === "USD") {
+      input.value = fmtNumber(baseUsd, "USD");
+    } else {
+      const r = rates[code];
+      if (!r) continue;
+      const val = baseUsd * r;
+      input.value = fmtNumber(val, code);
+    }
+  }
+
+  // update USD-equivalent text for every row based on current value
+  for (const [code, span] of usdSpans) {
+    const input = inputs.get(code);
+    const val = parseNum(input.value);
+    if (!Number.isFinite(val)) {
+      span.textContent = "—";
+      continue;
+    }
+    if (code === "USD") {
+      span.textContent = `≈ ${fmtNumber(val,"USD")} USD`;
+    } else {
+      const r = rates[code];
+      if (!r) { span.textContent = "—"; continue; }
+      const usdVal = val / r;
+      span.textContent = `≈ ${fmtNumber(usdVal,"USD")} USD`;
+    }
+  }
+}
+
+function onInput(e) {
+  const code = e.target.dataset.code;
+  const val = parseNum(e.target.value);
+  if (!rates || !rates.USD) return;
+
+  if (code === "USD") {
+    // Don't reformat USD itself while typing; just drive everything else.
+    if (!Number.isFinite(val)) {
+      // clear others' USD text if needed
+      const span = usdSpans.get("USD");
+      if (span) span.textContent = "—";
+      return;
+    }
+    updateAllFromUSD(val, "USD");
+  } else {
+    // Editing a non-USD currency: only update its USD conversion text.
+    const span = usdSpans.get(code);
+    const r = rates[code];
+    if (!span || !r || !Number.isFinite(val)) {
+      if (span) span.textContent = "—";
+      return;
+    }
+    const usdVal = val / r;
+    span.textContent = `≈ ${fmtNumber(usdVal,"USD")} USD`;
+  }
+}
+
+// === Rates ===
+async function fetchWithTimeout(url, ms = 8000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const res = await fetch(url, { cache:"no-store", signal: ctl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function getRates_erapi() {
+  const url = "https://open.er-api.com/v6/latest/USD";
+  const data = await fetchWithTimeout(url);
+  if (data.result !== "success") throw new Error("er-api result not success");
+  const r = { USD:1, ...data.rates };
+  return { r, date:(data.time_last_update_utc || "").slice(5,16), source:"open.er-api.com" };
+}
+
+async function getRates_frankfurter() {
+  const symbols = CURRENCIES.map(c => c[0]).filter(c => c !== "USD").join(",");
+  const url = `https://api.frankfurter.app/latest?from=USD&to=${encodeURIComponent(symbols)}`;
+  const data = await fetchWithTimeout(url);
+  const r = { USD:1, ...data.rates };
+  return { r, date:data.date, source:"frankfurter.app" };
+}
+
+async function getRates_host() {
+  const symbols = CURRENCIES.map(c => c[0]).join(",");
+  const url = `https://api.exchangerate.host/latest?base=USD&symbols=${encodeURIComponent(symbols)}`;
+  const data = await fetchWithTimeout(url);
+  const r = { USD:1, ...data.rates };
+  return { r, date:data.date, source:"exchangerate.host" };
+}
+
+async function loadRatesWithFallback() {
+  const attempts = [getRates_erapi, getRates_frankfurter, getRates_host];
+  const errors = [];
+  for (const fn of attempts) {
+    try {
+      const out = await fn();
+      console.log("[rates] Loaded from", out.source);
+      return out;
+    } catch (err) {
+      console.warn("[rates] Source failed:", fn.name, err);
+      errors.push(`${fn.name}: ${err.message || err}`);
+    }
+  }
+  const err = new Error("All rate sources failed.\n" + errors.join("\n"));
+  err._details = errors;
+  throw err;
+}
+
+function loadCached() {
+  try {
+    const j = JSON.parse(localStorage.getItem("usd_multi_rates") || "null");
+    if (!j) return false;
+    rates = j.rates || {};
+    lastFetchISO = j.asof || null;
+    return Object.keys(rates).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function saveCached() {
+  try {
+    localStorage.setItem("usd_multi_rates", JSON.stringify({ rates, asof:lastFetchISO }));
+  } catch {}
+}
+
+async function refreshRates() {
+  setStatus(null,"Fetching live rates…");
+  warn.style.display = "none";
+
+  try {
+    const { r, date, source } = await loadRatesWithFallback();
+    rates = r;
+    lastFetchISO = date;
+    saveCached();
+
+    setStatus("ok", `Live rates loaded (${source})`);
+    asof.textContent = lastFetchISO ? `as of ${lastFetchISO}` : "";
+
+    // Ensure USD has a value and drive table
+    const usdField = inputs.get("USD");
+    if (!usdField.value.trim()) usdField.value = "0.10";
+    const baseUsd = parseNum(usdField.value) || 0.10;
+    updateAllFromUSD(baseUsd, "USD"); // don't re-touch what user has typed
+  } catch (err) {
+    console.error("Rate refresh failed:", err);
+    setStatus("err","Failed to load rates");
+    const hadCache = Object.keys(rates || {}).length > 0;
+    warn.textContent = (hadCache
+      ? "Couldn’t refresh rates just now. Showing last cached values.\n\n" + (err._details?.join("\n") || err.message)
+      : "Couldn’t load rates and no cached values are available.\n\n" + (err._details?.join("\n") || err.message));
+    warn.style.display = "block";
+
+    if (!hadCache) {
+      rates = { USD:1 };
+      lastFetchISO = null;
+    }
+    asof.textContent = lastFetchISO ? `as of ${lastFetchISO}` : "";
+  }
+}
+
+// === Init ===
+function init() {
+  buildUI();
+
+  // Default USD field to 0.10 for you
+  const usdField = inputs.get("USD");
+  usdField.value = "0.10";
+
+  const hadCache = loadCached();
+  if (hadCache) {
+    setStatus("ok","Using cached rates");
+    asof.textContent = lastFetchISO ? `as of ${lastFetchISO}` : "";
+    const baseUsd = parseNum(usdField.value) || 0.10;
+    updateAllFromUSD(baseUsd, "USD");
+  } else {
+    setStatus(null,"Fetching live rates…");
+  }
+
+  refreshRates();
+}
+
+refreshBtn.addEventListener("click", refreshRates);
+init();
+</script>
+</body>
+</html>

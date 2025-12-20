@@ -1,0 +1,285 @@
+<!-- weekly.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Weekly Bonus Calculator</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:#0b0f14;
+      color:#e7eef7;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    .card{
+      width:min(720px, 92vw);
+      background: rgba(18, 24, 33, 0.92);
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+    }
+    h1{
+      margin:0 0 6px 0;
+      font-size: 20px;
+      letter-spacing: .2px;
+    }
+    .sub{
+      margin:0 0 18px 0;
+      color:#9fb0c3;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 720px){
+      .grid{ grid-template-columns: 1fr; }
+    }
+    label{
+      display:block;
+      font-size: 12px;
+      color:#9fb0c3;
+      margin: 0 0 8px 0;
+    }
+    input{
+      width:100%;
+      padding: 12px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(7, 10, 14, 0.65);
+      color:#e7eef7;
+      outline: none;
+      font-size: 14px;
+      transition: border-color .12s ease, box-shadow .12s ease;
+    }
+    input:focus{
+      border-color: rgba(120, 200, 255, 0.35);
+      box-shadow: 0 0 0 4px rgba(120, 200, 255, 0.10);
+    }
+    .row{
+      display:flex;
+      gap: 10px;
+      align-items:center;
+      margin-top: 14px;
+    }
+    button{
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
+      color:#e7eef7;
+      cursor:pointer;
+      font-size: 13px;
+      transition: transform .05s ease, background .12s ease, border-color .12s ease;
+    }
+    button:hover{ background: rgba(255,255,255,0.09); }
+    button:active{ transform: translateY(1px); }
+    .result{
+      margin-top: 16px;
+      padding: 14px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(7, 10, 14, 0.45);
+      display:flex;
+      justify-content:space-between;
+      gap: 12px;
+      align-items:center;
+    }
+    .result .label{
+      color:#9fb0c3;
+      font-size: 12px;
+    }
+    .result .value{
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+    .meta{
+      margin-top: 10px;
+      font-size: 12px;
+      color:#9fb0c3;
+      display:flex;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .pill{
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.05);
+    }
+    .warn{
+      color:#ffcf7a;
+    }
+    .ok{
+      color:#9fe7b0;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Weekly Bonus Calculator</h1>
+    <p class="sub">
+      Enter <b>Wager</b> and <b>Profit</b>. Supports <code>$</code>, commas, and negatives (e.g. <code>-$1,380</code>).
+      The result is rounded to the nearest dollar (like your Excel <code>ROUND(...,0)</code>).
+    </p>
+
+    <section class="grid">
+      <div>
+        <label for="wager">Wager (H2)</label>
+        <input id="wager" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="$220,058" />
+      </div>
+      <div>
+        <label for="profit">Profit (H3)</label>
+        <input id="profit" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="-$4,354" />
+      </div>
+    </section>
+
+    <div class="row">
+      <button id="btnFormat" type="button" title="Format inputs as currency">Format</button>
+      <button id="btnClear" type="button">Clear</button>
+      <div style="flex:1"></div>
+      <div class="pill" id="status">Ready</div>
+    </div>
+
+    <div class="result" aria-live="polite">
+      <div>
+        <div class="label">Weekly Bonus</div>
+        <div class="label" style="margin-top:6px">Formula: tiered % of wager + lossback on negative profit</div>
+      </div>
+      <div class="value" id="weeklyBonus">$0</div>
+    </div>
+
+    <div class="meta">
+      <div class="pill" id="tierPill">Tier: —</div>
+      <div class="pill" id="lossbackPill">Lossback: $0</div>
+      <div class="pill" id="wagerPartPill">Wager part: $0</div>
+    </div>
+  </main>
+
+  <script>
+    // ---- Parsing / formatting helpers ----
+    function parseMoneyLike(input) {
+      if (input == null) return 0;
+      const s = String(input).trim();
+      if (!s) return 0;
+
+      // Keep digits, minus, dot. Remove $, commas, spaces, etc.
+      const cleaned = s.replace(/[^0-9.\-]/g, "");
+      // Handle cases like "-" or "." etc.
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    const fmt0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+    const fmt2 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function formatCurrency0(n) {
+      const sign = n < 0 ? "-" : "";
+      const abs = Math.abs(n);
+      return sign + "$" + fmt0.format(abs);
+    }
+
+    function formatCurrency2(n) {
+      const sign = n < 0 ? "-" : "";
+      const abs = Math.abs(n);
+      return sign + "$" + fmt2.format(abs);
+    }
+
+    // ---- Core formula (matches your Excel) ----
+    // =ROUND(
+    //   IF(wager < 91213, 0.00245052*wager, 0.00197843*wager)
+    //   + 0.02932376*MAX(0,-profit)
+    // ,0)
+    function calcWeeklyBonus(wager, profit) {
+      const wagerPart = (wager < 91213) ? (0.00245052 * wager) : (0.00197843 * wager);
+      const loss = Math.max(0, -profit);
+      const lossback = 0.02932376 * loss;
+      const total = wagerPart + lossback;
+
+      // Excel ROUND(x,0) = nearest integer (0 decimals).
+      // JS Math.round uses halves away from zero for positive; good enough for typical values here.
+      const rounded = Math.round(total);
+
+      return { rounded, wagerPart, lossback, tier: (wager < 91213) ? "Lower (< 91,213)" : "Higher (≥ 91,213)" };
+    }
+
+    // ---- UI wiring ----
+    const elWager = document.getElementById("wager");
+    const elProfit = document.getElementById("profit");
+    const elWeeklyBonus = document.getElementById("weeklyBonus");
+    const elTier = document.getElementById("tierPill");
+    const elLossback = document.getElementById("lossbackPill");
+    const elWagerPart = document.getElementById("wagerPartPill");
+    const elStatus = document.getElementById("status");
+    const btnFormat = document.getElementById("btnFormat");
+    const btnClear = document.getElementById("btnClear");
+
+    function update() {
+      const wager = parseMoneyLike(elWager.value);
+      const profit = parseMoneyLike(elProfit.value);
+
+      const { rounded, wagerPart, lossback, tier } = calcWeeklyBonus(wager, profit);
+
+      elWeeklyBonus.textContent = formatCurrency0(rounded);
+      elTier.textContent = "Tier: " + tier;
+      elLossback.textContent = "Lossback: " + formatCurrency2(lossback);
+      elWagerPart.textContent = "Wager part: " + formatCurrency2(wagerPart);
+
+      // Status hint
+      if (!elWager.value.trim() && !elProfit.value.trim()) {
+        elStatus.textContent = "Ready";
+        elStatus.className = "pill";
+      } else {
+        elStatus.textContent = "Live";
+        elStatus.className = "pill ok";
+      }
+    }
+
+    function formatInputs() {
+      const wager = parseMoneyLike(elWager.value);
+      const profit = parseMoneyLike(elProfit.value);
+
+      // Only format if user typed something (avoid turning empty into $0)
+      if (elWager.value.trim()) elWager.value = formatCurrency0(wager);
+      if (elProfit.value.trim()) elProfit.value = formatCurrency0(profit);
+
+      update();
+    }
+
+    function clearAll() {
+      elWager.value = "";
+      elProfit.value = "";
+      update();
+    }
+
+    elWager.addEventListener("input", update);
+    elProfit.addEventListener("input", update);
+
+    // Format on blur for convenience (and a button for manual formatting)
+    elWager.addEventListener("blur", () => { if (elWager.value.trim()) elWager.value = formatCurrency0(parseMoneyLike(elWager.value)); update(); });
+    elProfit.addEventListener("blur", () => { if (elProfit.value.trim()) elProfit.value = formatCurrency0(parseMoneyLike(elProfit.value)); update(); });
+
+    btnFormat.addEventListener("click", formatInputs);
+    btnClear.addEventListener("click", clearAll);
+
+    // Defaults (optional): you can set these if you want
+    // elWager.value = "$0";
+    // elProfit.value = "$0";
+
+    update();
+  </script>
+</body>
+</html>

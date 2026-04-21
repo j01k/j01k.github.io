@@ -8,8 +8,11 @@
   const GRAPHQL_URL = SITE_ORIGIN + "/_api/graphql";
   const ARCHIVE_URL_PREFIX = SITE_ORIGIN + "/_api/archive/";
   const ARCHIVE_PAGE_URL = SITE_ORIGIN + "/my-bets/archive";
+  const PICKER_HANDLE_KEY = "__stakeArchivePickedDirectory";
+  const PICKER_TRIED_KEY = "__stakeArchivePickerTried";
+  const PAGE_SIZE = 10;
   const QUERY =
-    "query BetArchive($offset: Int = 0, $limit: Int = 100) {\n" +
+    "query BetArchive($offset: Int = 0, $limit: Int = 10) {\n" +
     "  user {\n" +
     "    id\n" +
     "    betArchiveList(offset: $offset, limit: $limit) {\n" +
@@ -19,14 +22,8 @@
     "    }\n" +
     "  }\n" +
     "}";
-  const PAGE_SIZE = 10;
-  const REFERRER_PAGE_SIZE = 10;
-  const ZIP_PART_BYTES = 950 * 1024 * 1024;
-  const EMPTY_ZIP_BYTES = 22;
   const RUN_KEY = "__stakeArchiveExportRunning";
   const LOG_PREFIX = "[bet-archive]";
-  const encoder = new TextEncoder();
-  const crcTable = buildCrcTable();
 
   if (!HOST_RE.test(location.hostname)) {
     alert("Run this bookmarklet while you are on stake.com or stake.us.");
@@ -77,6 +74,7 @@
         (requestedRange.endDate || "latest") +
         "."
     );
+
     const scan = await collectArchives(sessionToken, requestedRange, ui, ensureActive);
 
     if (!scan.archives.length) {
@@ -89,6 +87,7 @@
 
     const firstDate = scan.archives[0].isoDate;
     const lastDate = scan.archives[scan.archives.length - 1].isoDate;
+    const exportFolderName = "bet-archives-" + firstDate + "-to-" + lastDate;
 
     ui.log(
       "Collected " +
@@ -110,38 +109,39 @@
       ui.log("Stopped listing because " + scan.stopReason + ".");
     }
 
-    ui.status("Downloading archives...");
-    const result = await exportArchives({
+    ui.status("Saving archives...");
+    const result = await saveArchives({
       archives: scan.archives,
       sessionToken,
+      requestedRange,
+      listingStopReason: scan.stopReason,
+      exportFolderName,
       saver,
       ui,
       ensureActive,
-      listingStopReason: scan.stopReason,
-      requestedRange,
     });
 
     ui.status("Finished.");
     ui.log(
       "Saved " +
-        result.partCount +
-        " ZIP part(s) with " +
-        result.downloaded +
-        " archive file(s)."
+        result.saved +
+        " archive file(s) to " +
+        saver.label +
+        "."
     );
 
     const summary = [
-      "Downloaded " +
-        result.downloaded +
+      "Saved " +
+        result.saved +
         " of " +
         scan.archives.length +
-        " listed archive file(s).",
+        " archive file(s).",
       "Requested range: " +
         (requestedRange.startDate || "earliest") +
         " to " +
         (requestedRange.endDate || "latest") +
         ".",
-      "Saved " + result.partCount + " ZIP part(s) to " + saver.label + ".",
+      "Output: " + saver.describe(exportFolderName) + ".",
     ];
 
     if (scan.stopReason === "start-date-reached") {
@@ -153,7 +153,7 @@
     if (result.failures.length) {
       summary.push(
         result.failures.length +
-          " archive download(s) failed. Check bet-archive-summary.json inside the ZIP output."
+          " archive download(s) failed. Check bet-archive-summary.json in the output."
       );
     }
 
@@ -191,52 +191,6 @@
     }
 
     return null;
-  }
-
-  async function createSaver(progressUi) {
-    if (typeof window.showDirectoryPicker === "function") {
-      try {
-        progressUi.log(
-          "Choose a folder for ZIP parts, or cancel to use normal browser downloads."
-        );
-
-        const directory = await window.showDirectoryPicker({
-          id: "stake-bet-archives",
-          mode: "readwrite",
-        });
-
-        progressUi.log("Using the selected folder for ZIP parts.");
-
-        return {
-          label: "the selected folder",
-          async save(blob, fileName) {
-            const handle = await directory.getFileHandle(fileName, { create: true });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-          },
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-
-        if (error && error.name !== "AbortError") {
-          progressUi.log(
-            "Folder picker failed (" + message + "). Falling back to browser downloads."
-          );
-        } else {
-          progressUi.log("Folder picker skipped. Using browser downloads.");
-        }
-      }
-    } else {
-      progressUi.log("File System Access API not available. Using browser downloads.");
-    }
-
-    return {
-      label: "browser downloads",
-      async save(blob, fileName) {
-        await downloadBlob(blob, fileName);
-      },
-    };
   }
 
   function promptDateRange() {
@@ -288,6 +242,92 @@
     return trimmed;
   }
 
+  async function createSaver(progressUi) {
+    const preselectedDirectory = window[PICKER_HANDLE_KEY] || null;
+    const pickerWasTried = Boolean(window[PICKER_TRIED_KEY]);
+
+    delete window[PICKER_HANDLE_KEY];
+    delete window[PICKER_TRIED_KEY];
+
+    if (
+      preselectedDirectory &&
+      typeof preselectedDirectory.getDirectoryHandle === "function"
+    ) {
+      progressUi.log("Using the folder you picked from the bookmarklet.");
+
+      return {
+        label: "the selected folder",
+        describe(folderName) {
+          return folderName + " inside the selected folder";
+        },
+        async saveText(folderName, fileName, text) {
+          const folder = await preselectedDirectory.getDirectoryHandle(folderName, {
+            create: true,
+          });
+          const handle = await folder.getFileHandle(fileName, { create: true });
+          const writable = await handle.createWritable();
+          await writable.write(text);
+          await writable.close();
+        },
+      };
+    }
+
+    if (!pickerWasTried && typeof window.showDirectoryPicker === "function") {
+      try {
+        progressUi.log(
+          "Choose a folder for the archive export, or cancel to use normal browser downloads."
+        );
+
+        const directory = await window.showDirectoryPicker({
+          id: "stake-bet-archives",
+          mode: "readwrite",
+        });
+
+        progressUi.log("Using the selected folder.");
+
+        return {
+          label: "the selected folder",
+          describe(folderName) {
+            return folderName + " inside the selected folder";
+          },
+          async saveText(folderName, fileName, text) {
+            const folder = await directory.getDirectoryHandle(folderName, {
+              create: true,
+            });
+            const handle = await folder.getFileHandle(fileName, { create: true });
+            const writable = await handle.createWritable();
+            await writable.write(text);
+            await writable.close();
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+
+        if (error && error.name !== "AbortError") {
+          progressUi.log(
+            "Folder picker failed (" + message + "). Falling back to browser downloads."
+          );
+        } else {
+          progressUi.log("Folder picker skipped. Using browser downloads.");
+        }
+      }
+    } else if (pickerWasTried) {
+      progressUi.log("Folder picker was skipped. Using browser downloads.");
+    } else {
+      progressUi.log("File System Access API not available. Using browser downloads.");
+    }
+
+    return {
+      label: "browser downloads",
+      describe() {
+        return "your browser downloads";
+      },
+      async saveText(_folderName, fileName, text) {
+        await downloadText(fileName, text);
+      },
+    };
+  }
+
   async function collectArchives(sessionToken, requestedRange, progressUi, ensureActive) {
     const archives = [];
     let offset = 0;
@@ -308,9 +348,7 @@
         }
 
         stopReason = error instanceof Error ? error.message : String(error);
-        progressUi.log(
-          "Stopped listing at offset " + offset + ": " + stopReason
-        );
+        progressUi.log("Stopped listing at offset " + offset + ": " + stopReason);
         break;
       }
 
@@ -334,6 +372,7 @@
           archives.length +
           " match the requested range."
       );
+
       offset += page.length;
 
       if (requestedRange.startDate) {
@@ -351,7 +390,7 @@
   }
 
   async function fetchArchivePage(sessionToken, offset) {
-    const page = Math.max(0, Math.floor(offset / REFERRER_PAGE_SIZE) - 1);
+    const page = Math.max(0, Math.floor(offset / PAGE_SIZE) - 1);
     const response = await fetch(GRAPHQL_URL, {
       credentials: "include",
       method: "POST",
@@ -419,80 +458,32 @@
     return true;
   }
 
-  async function exportArchives({
+  async function saveArchives({
     archives,
     sessionToken,
+    requestedRange,
+    listingStopReason,
+    exportFolderName,
     saver,
     ui: progressUi,
     ensureActive,
-    listingStopReason,
-    requestedRange,
   }) {
     const failures = [];
-    const zipLabel =
-      "bet-archives-" +
-      archives[0].isoDate +
-      "-to-" +
-      archives[archives.length - 1].isoDate;
-    let partNumber = 1;
-    let partCount = 0;
-    let downloaded = 0;
-    let entries = [];
-    let estimatedZipSize = EMPTY_ZIP_BYTES;
-
-    const flushPart = async () => {
-      if (!entries.length) {
-        return;
-      }
-
-      ensureActive();
-
-      const fileName =
-        zipLabel + "-part-" + String(partNumber).padStart(3, "0") + ".zip";
-      progressUi.status("Building " + fileName + "...");
-
-      const blob = new Blob([buildZip(entries)], { type: "application/zip" });
-      progressUi.log("Saving " + fileName + " (" + formatBytes(blob.size) + ").");
-      await saver.save(blob, fileName);
-
-      partNumber += 1;
-      partCount += 1;
-      entries = [];
-      estimatedZipSize = EMPTY_ZIP_BYTES;
-    };
+    let saved = 0;
 
     for (let index = 0; index < archives.length; index += 1) {
       ensureActive();
 
       const archive = archives[index];
       progressUi.status(
-        "Downloading " + (index + 1) + "/" + archives.length + ": " + archive.fileName
+        "Saving " + (index + 1) + "/" + archives.length + ": " + archive.fileName
       );
 
       try {
         const text = await fetchArchiveText(sessionToken, archive.id);
-        const bytes = encoder.encode(text);
-        const nextSize = estimateZipEntrySize(archive.fileName, bytes);
-
-        if (entries.length && estimatedZipSize + nextSize > ZIP_PART_BYTES) {
-          await flushPart();
-        }
-
-        entries.push({
-          name: archive.fileName,
-          bytes,
-          modifiedAt: new Date(archive.date),
-        });
-        estimatedZipSize += nextSize;
-        downloaded += 1;
-
-        progressUi.log(
-          "Queued " +
-            archive.fileName +
-            " (" +
-            formatBytes(bytes.length) +
-            ")."
-        );
+        await saver.saveText(exportFolderName, archive.fileName, text);
+        saved += 1;
+        progressUi.log("Saved " + archive.fileName + ".");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -506,38 +497,11 @@
       }
     }
 
-    const summaryEntry = buildSummaryEntry({
-      archivesListed: archives.length,
-      archivesDownloaded: downloaded,
-      listingStopReason,
-      requestedRange,
-      failures,
-    });
-    const summarySize = estimateZipEntrySize(summaryEntry.name, summaryEntry.bytes);
-
-    if (entries.length && estimatedZipSize + summarySize > ZIP_PART_BYTES) {
-      await flushPart();
-    }
-
-    entries.push(summaryEntry);
-    estimatedZipSize += summarySize;
-    await flushPart();
-
-    return { downloaded, partCount, failures };
-  }
-
-  function buildSummaryEntry({
-    archivesListed,
-    archivesDownloaded,
-    listingStopReason,
-    requestedRange,
-    failures,
-  }) {
-    const body = JSON.stringify(
+    const summaryText = JSON.stringify(
       {
         createdAt: new Date().toISOString(),
-        archivesListed,
-        archivesDownloaded,
+        archivesListed: archives.length,
+        archivesSaved: saved,
         listingStopReason,
         requestedRange: {
           startDate: requestedRange.startDate || null,
@@ -549,11 +513,9 @@
       2
     );
 
-    return {
-      name: "bet-archive-summary.json",
-      bytes: encoder.encode(body),
-      modifiedAt: new Date(),
-    };
+    await saver.saveText(exportFolderName, "bet-archive-summary.json", summaryText);
+
+    return { saved, failures };
   }
 
   async function fetchArchiveText(sessionToken, id) {
@@ -662,7 +624,8 @@
     };
   }
 
-  async function downloadBlob(blob, fileName) {
+  async function downloadText(fileName, text) {
+    const blob = new Blob([text], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
@@ -671,167 +634,14 @@
     link.style.display = "none";
     document.body.append(link);
     link.click();
-    await delay(250);
+    await delay(200);
     link.remove();
     URL.revokeObjectURL(url);
-  }
-
-  function estimateZipEntrySize(fileName, bytes) {
-    const byteLength =
-      bytes instanceof Uint8Array || bytes instanceof Uint8ClampedArray
-        ? bytes.length
-        : Number(bytes) || 0;
-    const nameLength = encoder.encode(fileName).length;
-
-    return 30 + nameLength + byteLength + 46 + nameLength;
-  }
-
-  // Store-only ZIP builder so we do not need a library.
-  function buildZip(entries) {
-    const fileParts = [];
-    const centralParts = [];
-    let fileOffset = 0;
-    let centralSize = 0;
-
-    for (const entry of entries) {
-      const nameBytes = encoder.encode(entry.name);
-      const bytes =
-        entry.bytes instanceof Uint8Array ? entry.bytes : new Uint8Array(entry.bytes);
-      const crc = crc32(bytes);
-      const dos = toDosDateTime(entry.modifiedAt || new Date());
-      const local = new Uint8Array(30 + nameBytes.length);
-      const localView = new DataView(local.buffer);
-
-      localView.setUint32(0, 0x04034b50, true);
-      localView.setUint16(4, 20, true);
-      localView.setUint16(6, 0x0800, true);
-      localView.setUint16(8, 0, true);
-      localView.setUint16(10, dos.time, true);
-      localView.setUint16(12, dos.date, true);
-      localView.setUint32(14, crc, true);
-      localView.setUint32(18, bytes.length, true);
-      localView.setUint32(22, bytes.length, true);
-      localView.setUint16(26, nameBytes.length, true);
-      localView.setUint16(28, 0, true);
-      local.set(nameBytes, 30);
-
-      const central = new Uint8Array(46 + nameBytes.length);
-      const centralView = new DataView(central.buffer);
-
-      centralView.setUint32(0, 0x02014b50, true);
-      centralView.setUint16(4, 20, true);
-      centralView.setUint16(6, 20, true);
-      centralView.setUint16(8, 0x0800, true);
-      centralView.setUint16(10, 0, true);
-      centralView.setUint16(12, dos.time, true);
-      centralView.setUint16(14, dos.date, true);
-      centralView.setUint32(16, crc, true);
-      centralView.setUint32(20, bytes.length, true);
-      centralView.setUint32(24, bytes.length, true);
-      centralView.setUint16(28, nameBytes.length, true);
-      centralView.setUint16(30, 0, true);
-      centralView.setUint16(32, 0, true);
-      centralView.setUint16(34, 0, true);
-      centralView.setUint16(36, 0, true);
-      centralView.setUint32(38, 0, true);
-      centralView.setUint32(42, fileOffset, true);
-      central.set(nameBytes, 46);
-
-      fileParts.push(local, bytes);
-      centralParts.push(central);
-      fileOffset += local.length + bytes.length;
-      centralSize += central.length;
-    }
-
-    const end = new Uint8Array(22);
-    const endView = new DataView(end.buffer);
-
-    endView.setUint32(0, 0x06054b50, true);
-    endView.setUint16(4, 0, true);
-    endView.setUint16(6, 0, true);
-    endView.setUint16(8, entries.length, true);
-    endView.setUint16(10, entries.length, true);
-    endView.setUint32(12, centralSize, true);
-    endView.setUint32(16, fileOffset, true);
-    endView.setUint16(20, 0, true);
-
-    const output = new Uint8Array(fileOffset + centralSize + end.length);
-    let cursor = 0;
-
-    for (const part of fileParts) {
-      output.set(part, cursor);
-      cursor += part.length;
-    }
-
-    for (const part of centralParts) {
-      output.set(part, cursor);
-      cursor += part.length;
-    }
-
-    output.set(end, cursor);
-    return output;
-  }
-
-  function toDosDateTime(value) {
-    const date = value instanceof Date ? value : new Date(value);
-    const year = Math.max(1980, date.getFullYear());
-
-    return {
-      date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
-      time:
-        (date.getHours() << 11) |
-        (date.getMinutes() << 5) |
-        Math.floor(date.getSeconds() / 2),
-    };
-  }
-
-  function buildCrcTable() {
-    const table = new Uint32Array(256);
-
-    for (let index = 0; index < 256; index += 1) {
-      let value = index;
-
-      for (let bit = 0; bit < 8; bit += 1) {
-        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-      }
-
-      table[index] = value >>> 0;
-    }
-
-    return table;
-  }
-
-  function crc32(bytes) {
-    let value = 0xffffffff;
-
-    for (let index = 0; index < bytes.length; index += 1) {
-      value = crcTable[(value ^ bytes[index]) & 0xff] ^ (value >>> 8);
-    }
-
-    return (value ^ 0xffffffff) >>> 0;
   }
 
   function delay(ms) {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
-  }
-
-  function formatBytes(bytes) {
-    if (bytes < 1024) {
-      return bytes + " B";
-    }
-
-    const units = ["KB", "MB", "GB", "TB"];
-    let value = bytes;
-    let unitIndex = -1;
-
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex += 1;
-    }
-
-    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
-    return value.toFixed(digits) + " " + units[unitIndex];
   }
 })();

@@ -19,7 +19,7 @@
     "    }\n" +
     "  }\n" +
     "}";
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 10;
   const REFERRER_PAGE_SIZE = 10;
   const ZIP_PART_BYTES = 950 * 1024 * 1024;
   const EMPTY_ZIP_BYTES = 22;

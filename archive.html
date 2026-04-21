@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stake Archive Downloader</title>
+    <style>
+      :root {
+        --bg:
+          radial-gradient(circle at top, rgba(255, 194, 102, 0.2), transparent 30%),
+          linear-gradient(160deg, #0c1422 0%, #121b2d 45%, #19253c 100%);
+        --card: rgba(12, 18, 31, 0.82);
+        --border: rgba(255, 214, 126, 0.18);
+        --text: #f8f4ea;
+        --muted: #d8ccb0;
+        --accent: #ffd67e;
+        --accent-2: #ffad66;
+        --shadow: rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Georgia, "Times New Roman", serif;
+      }
+
+      main {
+        width: min(560px, 100%);
+        padding: 32px 28px;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        background: var(--card);
+        box-shadow: 0 24px 80px var(--shadow);
+        text-align: center;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(2rem, 6vw, 3.4rem);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+      }
+
+      .bookmarklet {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 220px;
+        margin: 8px 0 24px;
+        padding: 18px 28px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 214, 126, 0.4);
+        background:
+          linear-gradient(180deg, rgba(255, 214, 126, 0.24), rgba(255, 173, 102, 0.14)),
+          rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          0 16px 36px rgba(255, 173, 102, 0.18);
+        cursor: grab;
+        user-select: none;
+      }
+
+      .bookmarklet:hover,
+      .bookmarklet:focus-visible {
+        transform: translateY(-1px);
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 1.02rem;
+      }
+
+      p + p {
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Stake Archive Downloader</h1>
+      <a
+        id="bookmarklet"
+        class="bookmarklet"
+        href="#"
+        draggable="true"
+        title="Stake Archive Downloader"
+        aria-label="Drag Me To Bookmarks"
+      >
+        Drag Me To Bookmarks
+      </a>
+      <p>Drag the bookmarklet to your bookmarks bar.</p>
+      <p>Go to `stake.com` or `stake.us` and click the bookmarklet.</p>
+    </main>
+
+    <script>
+      const SCRIPT_URL = "https://j01k.github.io/archivedl.js";
+      const SCRIPT_ID = "archivedl-remote-loader";
+      const bookmarkletCode =
+        "javascript:(()=>{" +
+        "const url=" + JSON.stringify(SCRIPT_URL) + ";" +
+        "const id=" + JSON.stringify(SCRIPT_ID) + ";" +
+        "const prior=document.getElementById(id);" +
+        "if(prior)prior.remove();" +
+        "const script=document.createElement('script');" +
+        "script.id=id;" +
+        "script.async=true;" +
+        "script.src=url+(url.includes('?')?'&':'?')+'v='+Date.now();" +
+        "script.onerror=()=>alert('ArchiveDL failed to load from '+url);" +
+        "(document.head||document.documentElement).appendChild(script);" +
+        "})();";
+
+      const bookmarklet = document.getElementById("bookmarklet");
+      bookmarklet.href = bookmarkletCode;
+    </script>
+  </body>
+</html>

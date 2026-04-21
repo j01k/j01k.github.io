@@ -114,12 +114,20 @@
     <script>
       const SCRIPT_URL = "https://j01k.github.io/archivedl.js";
       const SCRIPT_ID = "archivedl-remote-loader";
+      const PICKER_HANDLE_KEY = "__stakeArchivePickedDirectory";
+      const PICKER_TRIED_KEY = "__stakeArchivePickerTried";
       const bookmarkletCode =
-        "javascript:(()=>{" +
+        "javascript:(async()=>{" +
         "const url=" + JSON.stringify(SCRIPT_URL) + ";" +
         "const id=" + JSON.stringify(SCRIPT_ID) + ";" +
+        "const pickerHandleKey=" + JSON.stringify(PICKER_HANDLE_KEY) + ";" +
+        "const pickerTriedKey=" + JSON.stringify(PICKER_TRIED_KEY) + ";" +
         "const prior=document.getElementById(id);" +
         "if(prior)prior.remove();" +
+        "window[pickerTriedKey]=typeof window.showDirectoryPicker==='function';" +
+        "try{" +
+        "window[pickerHandleKey]=window[pickerTriedKey]?await window.showDirectoryPicker({id:'stake-bet-archives',mode:'readwrite'}):null;" +
+        "}catch(_){window[pickerHandleKey]=null;}" +
         "const script=document.createElement('script');" +
         "script.id=id;" +
         "script.async=true;" +
